@@ -24,17 +24,13 @@ import UIKit
 
 public class SwiftCarousel: UIView {
     //MARK: - Properties
-    
+    var configuration: SwiftCarouselConfiguration!
     /// Current target with velocity left
     internal var currentVelocityX: CGFloat?
     /// Maximum velocity that swipe can reach.
     internal var maxVelocity: CGFloat = 100.0
     // Bool to know if item has been selected by Tapping
     private var itemSelectedByTap = false
-    /// Number of items that were set at the start of init.
-    private var originalChoicesNumber = 0
-    /// Items that carousel shows. It is 3x more items than originalChoicesNumber.
-    private var choices: [UIView] = []
     /// Main UIScrollView.
     private var scrollView = UIScrollView()
     /// Current selected index (between 0 and choices count).
@@ -43,123 +39,32 @@ public class SwiftCarousel: UIView {
     private var currentRealSelectedIndex: Int?
     /// Carousel delegate that handles events like didSelect.
     public weak var delegate: SwiftCarouselDelegate?
-    /// Bool to set if by tap on item carousel should select it (scroll to it).
-    public var selectByTapEnabled = true
-    /// Scrolling type of carousel. You can constraint scrolling through items.
-    public var scrollType: SwiftCarouselScroll = .Default {
-        didSet {
-            if case .Max(let number) = scrollType where number <= 0 {
-                scrollType = .None
-            }
-            
-            switch scrollType {
-            case .None:
-                scrollView.scrollEnabled = false
-            case .Max, .Freely, .Default:
-                scrollView.scrollEnabled = true
-            }
-        }
-    }
-    
-    
-    /// Resize type of the carousel chosen from SwiftCarouselResizeType.
-    public var resizeType: SwiftCarouselResizeType = .WithoutResizing(0.0) {
-        didSet {
-            setupViews(choices)
-        }
-    }
-    /// If selected index is < 0, set it as nil.
-    /// We won't check with count number since it might be set before assigning items.
-    public var defaultSelectedIndex: Int? {
-        didSet {
-            if (defaultSelectedIndex < 0) {
-                defaultSelectedIndex = nil
-            }
-        }
-    }
-    /// If there is defaultSelectedIndex and was selected, the variable is true.
-    /// Otherwise it is not.
-    public var didSetDefaultIndex: Bool = false
     /// Current selected index (calculated by searching through views),
     /// It returns index between 0 and originalChoicesNumber.
     public var selectedIndex: Int? {
         let view = viewAtLocation(CGPoint(x: scrollView.contentOffset.x + CGRectGetWidth(scrollView.frame) / 2.0, y: CGRectGetMinY(scrollView.frame)))
-        guard var index = choices.indexOf({ $0 == view }) else {
+        guard var index = configuration.choices.indexOf({ $0 == view }) else {
             return nil
         }
         
-        while index >= originalChoicesNumber {
-            index -= originalChoicesNumber
+        while index >= configuration.originalChoicesNumber {
+            index -= configuration.originalChoicesNumber
         }
-        
         return index
     }
+    
     /// Current selected index (calculated by searching through views),
     /// It returns index between 0 and choices count.
     private var realSelectedIndex: Int? {
         let view = viewAtLocation(CGPoint(x: scrollView.contentOffset.x + CGRectGetWidth(scrollView.frame) / 2.0, y: CGRectGetMinY(scrollView.frame)))
-        guard let index = choices.indexOf({ $0 == view }) else {
+        guard let index = configuration.choices.indexOf({ $0 == view }) else {
             return nil
         }
         
         return index
     }
-    /// Carousel items. You can setup your carousel using this method (static items), or
-    /// you can also see `itemsFactory`, which uses closure for the setup.
-    /// Warning: original views are copied internally and are not guaranteed to be complete when the `didSelect` and `didDeselect` delegate methods are called. Use `itemsFactory` instead to avoid this limitation.
-    public var items: [UIView] {
-        get {
-            return [UIView](choices[choices.count / 3..<(choices.count / 3 + originalChoicesNumber)])
-        }
-        set {
-            originalChoicesNumber = newValue.count
-            (0..<3).forEach { counter in
-                let newViews: [UIView] = newValue.map { choice in
-                    // Return original view if middle section
-                    if counter == 1 {
-                        return choice
-                    } else {
-                        do {
-                            return try choice.copyView()
-                        } catch {
-                            fatalError("There was a problem with copying view.")
-                        }
-                    }
-                }
-                self.choices.appendContentsOf(newViews)
-            }
-            setupViews(choices)
-        }
-    }
-    
-    /// Factory for carousel items. Here you specify how many items do you want in carousel
-    /// and you need to specify closure that will create that view. Remember that it should
-    /// always create new view, not give the same reference all the time.
-    /// If the factory closure returns a reference to a view that has already been returned, a SwiftCarouselError.ViewAlreadyAdded error is thrown.
-    /// You can always setup your carousel using `items` instead.
-    public func itemsFactory(itemsCount count: Int, factory: (index: Int) -> UIView) throws {
-        guard count > 0 else { return }
-        
-        originalChoicesNumber = count
-        try (0..<3).forEach { counter in
-            let newViews: [UIView] = try 0.stride(to: count, by: 1).map { i in
-                let view = factory(index: i)
-                guard !self.choices.contains(view) else {
-                    throw SwiftCarouselError.ViewAlreadyAdded
-                }
-                return view
-            }
-            self.choices.appendContentsOf(newViews)
-        }
-        setupViews(choices)
-    }
     
     // MARK: - Inits
-    public override init(frame: CGRect) {
-        super.init(frame: frame)
-        setup()
-    }
-    
     public required init?(coder aDecoder: NSCoder) {
         super.init(coder: aDecoder)
         setup()
@@ -174,10 +79,18 @@ public class SwiftCarousel: UIView {
      Warning: original views in `items` are copied internally and are not guaranteed to be complete when the `didSelect` and `didDeselect` delegate methods are called. Use `itemsFactory` instead to avoid this limitation.
      
      */
-    public convenience init(frame: CGRect, items: [UIView]) {
-        self.init(frame: frame)
+    public init(frame: CGRect, items: [UIView]) {
+        super.init(frame: frame)
+        let configuration = SwiftCarouselConfiguration()
+        configuration.items = items
+        self.configuration = configuration
         setup()
-        self.items = items
+    }
+
+    public init(frame: CGRect, configuration: SwiftCarouselConfiguration) {
+        super.init(frame: frame)
+        self.configuration = configuration
+        setup()
     }
     
     deinit {
@@ -213,14 +126,23 @@ public class SwiftCarousel: UIView {
         scrollView.backgroundColor = .clearColor()
         scrollView.addObserver(self, forKeyPath: "contentOffset", options: [.New, .Old], context: nil)
         
-        if selectByTapEnabled {
+        if self.configuration.selectByTapEnabled {
             let gestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(viewTapped(_:)))
             gestureRecognizer.cancelsTouchesInView = false
             gestureRecognizer.delegate = self
             scrollView.addGestureRecognizer(gestureRecognizer)
         }
-    }
+
+        switch self.configuration.scrollType {
+        case .None:
+            scrollView.scrollEnabled = false
+        case .Max, .Freely, .Default:
+            scrollView.scrollEnabled = true
+        }
         
+        setupViews(configuration.choices)
+    }
+    
     /**
      Setup views. Function that is fired up when setting the resizing type or items array.
      
@@ -228,13 +150,13 @@ public class SwiftCarousel: UIView {
      */
     private func setupViews(views: [UIView]) {
         var x: CGFloat = 0.0
-        if case .FloatWithSpacing(_) = resizeType {
+        if case .FloatWithSpacing(_) = self.configuration.resizeType {
             views.forEach { $0.sizeToFit() }
         }
         
         views.forEach { choice in
             var additionalSpacing: CGFloat = 0.0
-            switch resizeType {
+            switch self.configuration.resizeType {
             case .WithoutResizing(let spacing): additionalSpacing = spacing
             case .FloatWithSpacing(let spacing): additionalSpacing = spacing
             case .VisibleItemsPerPage(let visibleItems):
@@ -261,11 +183,11 @@ public class SwiftCarousel: UIView {
         guard (scrollView.frame.width > 0 && scrollView.frame.height > 0)  else { return }
         
         var width: CGFloat = 0.0
-        switch resizeType {
+        switch self.configuration.resizeType {
         case .FloatWithSpacing(_), .WithoutResizing(_):
-            width = CGRectGetMaxX(choices.last!.frame)
+            width = CGRectGetMaxX(configuration.choices.last!.frame)
         case .VisibleItemsPerPage(_):
-            width = choices.reduce(0.0) { $0 + CGRectGetWidth($1.frame) }
+            width = configuration.choices.reduce(0.0) { $0 + CGRectGetWidth($1.frame) }
         }
         
         scrollView.contentSize = CGSize(width: width, height: CGRectGetHeight(frame))
@@ -277,12 +199,12 @@ public class SwiftCarousel: UIView {
         // was set after the carousel init, so we check if the default index is != nil
         // and that it wasn't set before.
         guard currentSelectedIndex == nil ||
-            (didSetDefaultIndex == false && defaultSelectedIndex != nil) else { return }
+            (self.configuration.didSetDefaultIndex == false && self.configuration.defaultSelectedIndex != nil) else { return }
         
         // Center the view
-        if defaultSelectedIndex != nil {
-            selectItem(defaultSelectedIndex!, animated: false)
-            didSetDefaultIndex = true
+        if self.configuration.defaultSelectedIndex != nil {
+            selectItem(self.configuration.defaultSelectedIndex!, animated: false)
+            self.configuration.didSetDefaultIndex = true
         } else {
             selectItem(0, animated: false)
         }
@@ -317,7 +239,7 @@ public class SwiftCarousel: UIView {
     // MARK: - Gestures
     public func viewTapped(gestureRecognizer: UIGestureRecognizer) {
         let touchPoint = gestureRecognizer.locationInView(scrollView)
-        if let view = viewAtLocation(touchPoint), index = choices.indexOf(view) {
+        if let view = viewAtLocation(touchPoint), index = configuration.choices.indexOf(view) {
             itemSelectedByTap = true
             selectItem(index, animated: true, force: true)
         }
@@ -331,12 +253,12 @@ public class SwiftCarousel: UIView {
     notification to the delegate.
     */
     internal func didSelectItem() {
-        guard let selectedIndex = self.selectedIndex, realSelectedIndex = self.realSelectedIndex else {
+        guard let selectedIndex = selectedIndex, realSelectedIndex = self.realSelectedIndex else {
             return
         }
         
         didDeselectItem()
-        delegate?.didSelectItem?(item: choices[realSelectedIndex], index: selectedIndex, tapped: itemSelectedByTap)
+        delegate?.didSelectItem?(item: configuration.choices[realSelectedIndex], index: selectedIndex, tapped: itemSelectedByTap)
         itemSelectedByTap = false
         currentSelectedIndex = selectedIndex
         currentRealSelectedIndex = realSelectedIndex
@@ -353,7 +275,7 @@ public class SwiftCarousel: UIView {
             return
         }
         
-        delegate?.didDeselectItem?(item: choices[currentRealSelectedIndex], index: currentSelectedIndex)
+        delegate?.didDeselectItem?(item: configuration.choices[currentRealSelectedIndex], index: currentSelectedIndex)
     }
     
     /**
@@ -404,7 +326,7 @@ public class SwiftCarousel: UIView {
             // Now check left and right margins to nearest views
             var step: CGFloat = 1.0
             
-            switch resizeType {
+            switch self.configuration.resizeType {
             case .FloatWithSpacing(let spacing):
                 step = spacing
             case .WithoutResizing(let spacing):
@@ -444,9 +366,9 @@ public class SwiftCarousel: UIView {
         }
         
         // Check if the view is in bounds of scrolling type
-        if case .Max(let maxItems) = scrollType,
+        if case .Max(let maxItems) = self.configuration.scrollType,
             let currentRealSelectedIndex = currentRealSelectedIndex,
-            var newIndex = choices.indexOf ({ $0 == view }) {
+            var newIndex = configuration.choices.indexOf ({ $0 == view }) {
             
             if UInt(abs(newIndex - currentRealSelectedIndex)) > maxItems {
                 if newIndex > currentRealSelectedIndex {
@@ -457,14 +379,14 @@ public class SwiftCarousel: UIView {
             }
             
             while newIndex < 0 {
-                newIndex += originalChoicesNumber
+                newIndex += configuration.originalChoicesNumber
             }
             
-            while newIndex > choices.count {
-                newIndex -= originalChoicesNumber
+            while newIndex > configuration.choices.count {
+                newIndex -= configuration.originalChoicesNumber
             }
             
-            view = choices[newIndex]
+            view = configuration.choices[newIndex]
         }
         
         return view
@@ -482,14 +404,14 @@ public class SwiftCarousel: UIView {
         var index = choice
         if !force {
             // allow scroll only in the range of original items
-            guard choice < choices.count / 3 else {
+            guard choice < configuration.choices.count / 3 else {
                 return
             }
             // move to same item in middle segment
-            index = index + originalChoicesNumber
+            index = index + configuration.originalChoicesNumber
         }
         
-        let choiceView = choices[index]
+        let choiceView = configuration.choices[index]
         let x = choiceView.center.x - CGRectGetWidth(scrollView.frame) / 2.0
         
         let newPosition = CGPoint(x: x, y: scrollView.contentOffset.y)
