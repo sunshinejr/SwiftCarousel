@@ -213,10 +213,12 @@ public class SwiftCarousel: UIView {
         scrollView.backgroundColor = .clearColor()
         scrollView.addObserver(self, forKeyPath: "contentOffset", options: [.New, .Old], context: nil)
         
-        let gestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(viewTapped(_:)))
-        gestureRecognizer.cancelsTouchesInView = false
-        gestureRecognizer.delegate = self
-        scrollView.addGestureRecognizer(gestureRecognizer)
+        if selectByTapEnabled {
+            let gestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(viewTapped(_:)))
+            gestureRecognizer.cancelsTouchesInView = false
+            gestureRecognizer.delegate = self
+            scrollView.addGestureRecognizer(gestureRecognizer)
+        }
     }
         
     /**
@@ -314,12 +316,10 @@ public class SwiftCarousel: UIView {
     
     // MARK: - Gestures
     public func viewTapped(gestureRecognizer: UIGestureRecognizer) {
-        if selectByTapEnabled {
-            let touchPoint = gestureRecognizer.locationInView(scrollView)
-            if let view = viewAtLocation(touchPoint), index = choices.indexOf(view) {
-                itemSelectedByTap = true
-                selectItem(index, animated: true, force: true)
-            }
+        let touchPoint = gestureRecognizer.locationInView(scrollView)
+        if let view = viewAtLocation(touchPoint), index = choices.indexOf(view) {
+            itemSelectedByTap = true
+            selectItem(index, animated: true, force: true)
         }
     }
     
